@@ -1,13 +1,7 @@
-# Planejamento Acadêmico — Enfermagem (Protótipo 21)
+Protótipo 22 — Enfermagem — 2027.1
 
-Protótipo HTML estático do planejamento acadêmico do curso de Enfermagem, semestre 2027.1.
+Abrir index.html no navegador. Arquivo autossuficiente com logomarcas embutidas.
 
-## Como usar
+Novidade: carga horária semanal atribuída por profissional nas disciplinas de Estágio (Docência e Estágio), inteiro >= 0; matriz preservada. Turmas ofertadas e Conferência da V21 mantidas.
 
-Abra `index.html` no navegador ou publique o repositório com GitHub Pages (apenas se os dados incluídos puderem ser divulgados).
-
-## Atenção
-
-- O protótipo contém nomes e matrículas institucionais de profissionais. **Use um repositório privado** e não ative GitHub Pages público sem autorização institucional.
-- Os registros são salvos no `localStorage` do navegador; não há banco de dados central, autenticação real ou sincronização entre usuários.
-- Esta é a versão 21 original. A melhoria discutida para mostrar pendências de períodos não ativados administrativamente **ainda não foi aplicada**.
+Dados armazenados localmente no navegador (localStorage). A versão 22 importa os dados da versão 21 no mesmo navegador/origem, quando disponíveis.
