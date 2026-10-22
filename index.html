@@ -98,7 +98,17 @@ function docenciaErrors(r){
  });
  return errors;
 }
-function getStatus(r){return !Array.isArray(r.parts)||!r.parts.length?'Pendente':docenciaErrors(r).length?'Parcial':'Completa'}
+// O status usa a mesma integridade, unicidade e os mesmos conflitos da Conferência.
+function docenciaReview(r,records=db.records.filter(x=>db.active.includes(x.cohort))){
+ const errors=docenciaErrors(r),integrityValid=!errors.length,matches=records.filter(x=>recordKey(x)===recordKey(r));
+ if(matches.length>1||matches.some(x=>x.id!==r.id))errors.push('Planejamentos principais duplicados; revise os registros.');
+ if(integrityValid){
+  const validRecords=records.filter(x=>!docenciaErrors(x).length);
+  errors.push(...conflicts(decorate(r),r.id,validRecords));
+ }
+ return {status:!Array.isArray(r.parts)||!r.parts.length?'Pendente':errors.length?'Parcial':'Completa',errors};
+}
+function getStatus(r){return docenciaReview(r).status}
 function allParts(exclude,records=db.records){return records.filter(r=>r.id!==exclude).flatMap(r=>r.parts.map(p=>({...p,recordId:r.id,subject:r.subjectName,cohort:r.cohort}))) }
 function conflict(a,b){if(a.day!==b.day||!a.blocks||!b.blocks||!a.blocks.some(x=>b.blocks.some(y=>x[0]<y[1]&&y[0]<x[1])))return [];
 let e=[];if(a.teacher===b.teacher&&a.teacher!=='doc2'&&a.teacher!=='doc3')e.push('Professor '+name(a.teacher));if(a.room===b.room)e.push('Sala '+a.room);
@@ -130,9 +140,8 @@ function planningValidation(){
  const activeRecords=db.records.filter(r=>db.active.includes(r.cohort));
  const duplicates=duplicateRecordKeys().filter(key=>activeRecords.some(r=>recordKey(r)===key));
  const doc=allExpected().map(x=>{
-  const errors=!x.record?['Planejamento de Docência ausente.']:docenciaErrors(x.record);
-  if(duplicates.includes(x.cohort+'|'+x.subjectCode))errors.push('Planejamentos principais duplicados; revise os registros.');
-  return {...x,nucleus:'D',status:!x.record||!x.record.parts?.length?'Pendente':errors.length?'Parcial':'Completa',errors};
+  const review=x.record?docenciaReview(x.record,activeRecords):{status:'Pendente',errors:['Planejamento de Docência ausente.']};
+  return {...x,nucleus:'D',...review};
  });
  const field=stageExpected().map(x=>({...x,nucleus:'E',stage:true,record:null,status:stageStatus(x),errors:stageStatus(x)==='Completa'?[]:['Cadastre ao menos um grupo e complete todas as atribuições de Campo.']}));
  const conflictRecords=activeRecords.filter(r=>!docenciaErrors(r).length);
