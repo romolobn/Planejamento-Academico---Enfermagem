@@ -43,9 +43,64 @@ const previousKey='planejamento-enfermagem-g32047-v21';
 const oldKey='planejamento-enfermagem-g32047-v19';
 const stageLocations=['CAPS III','CF EMILIA GOMES','CF VALVERDE','CF VILA OPERÁRIA','CS VASCO BARCELOS','H.IGUASSU','HGNI','HTO'];
 const SEMESTER='2027.1';
-let db={records:[],extras:[],stages:[],active:[],workflow:'editing',comments:'',events:[],observations:[],versions:[]};
-try{let saved=JSON.parse(localStorage.getItem(key)||localStorage.getItem(previousKey)||'null');if(saved){db={...db,...saved}}else{let legacy=JSON.parse(localStorage.getItem(oldKey)||'null');if(legacy){db={...db,...legacy,active:[]};db.records.forEach(r=>{r.teacher=LEGACY_MAP[r.teacher]||r.teacher;r.parts.forEach(p=>p.teacher=LEGACY_MAP[p.teacher]||p.teacher)});db.extras.forEach(e=>e.teacher=LEGACY_MAP[e.teacher]||e.teacher);db.events.push({when:new Date().toLocaleString('pt-BR'),action:'Dados de Docência anteriores importados para o Protótipo 22; turmas disponíveis para escolha.'});localStorage.setItem(key,JSON.stringify(db))}}}catch(e){console.warn('Falha ao ler dados locais',e)}
-db.stages ||= [];db.observations ||= [];db.versions ||= [];db.active ||= [];
+function emptyDatabase(){return {records:[],extras:[],stages:[],active:[],workflow:'editing',comments:'',events:[],observations:[],versions:[]}}
+let db=emptyDatabase();
+const storageRecovery={blocked:false,source:null,preview:false,message:'',sources:[],expectedV22:null};
+// Validação estrutural, sem correção acadêmica nem exclusão de registros.
+function storageShapeErrors(data){
+ const object=x=>!!x&&typeof x==='object'&&!Array.isArray(x),errors=[];
+ if(!object(data))return ['O conteúdo não é um objeto de planejamento.'];
+ const pending=[data];
+ while(pending.length){const value=pending.pop();if(typeof value==='number'&&!Number.isFinite(value)){errors.push('Número fora do intervalo suportado; o conteúdo original requer revisão.');break}if(value&&typeof value==='object')for(const child of Object.values(value))pending.push(child)}
+ if(!Array.isArray(data.records))errors.push('records deve ser uma lista.');
+ for(const field of ['extras','stages','active','events','observations','versions'])if(field in data&&!Array.isArray(data[field]))errors.push(field+' deve ser uma lista.');
+ if('workflow' in data&&!['editing','submitted','approved'].includes(data.workflow))errors.push('Situação do planejamento não reconhecida.');
+ if('comments' in data&&typeof data.comments!=='string')errors.push('Comentários com estrutura não reconhecida.');
+ if(Array.isArray(data.active)&&data.active.some(x=>typeof x!=='string'))errors.push('Turmas ofertadas com estrutura não reconhecida.');
+ const objects=(list,path)=>{if(!Array.isArray(list))return [];if(list.some(x=>!object(x))){errors.push(path+' contém item sem estrutura de objeto.');return list.filter(object)}return list};
+ for(const r of objects(data.records,'records')){
+  if(!Array.isArray(r.parts)){errors.push('Um registro de Docência não possui lista de atribuições.');continue}
+  for(const part of objects(r.parts,'parts'))if(part.blocks!=null&&(!Array.isArray(part.blocks)||part.blocks.some(x=>!Array.isArray(x)||x.length!==2||x.some(n=>typeof n!=='number'))))errors.push('Horário de Docência com estrutura não reconhecida.');
+ }
+ objects(data.extras,'extras');objects(data.events,'events');objects(data.observations,'observations');objects(data.versions,'versions');
+ for(const g of objects(data.stages,'stages')){
+  if(!Array.isArray(g.people)){errors.push('Um grupo de Campo não possui lista de profissionais.');continue}
+  for(const person of objects(g.people,'people')){
+   if(!Array.isArray(person.schedule)){errors.push('Um profissional de Campo não possui lista de horários.');continue}
+   objects(person.schedule,'schedule');
+  }
+ }
+ return errors;
+}
+function readStoredSource(storageKey){
+ let raw;
+ try{raw=localStorage.getItem(storageKey)}catch(e){return {key:storageKey,raw:null,status:'unreadable',errors:['Não foi possível acessar esta chave.']}}
+ if(raw===null)return {key:storageKey,raw,status:'absent',errors:[]};
+ let data;
+ try{data=JSON.parse(raw)}catch(e){return {key:storageKey,raw,status:'invalid',errors:['JSON inválido.']}}
+ let errors;
+ try{errors=storageShapeErrors(data)}catch(e){errors=['A estrutura não pôde ser validada com segurança.']}
+ return {key:storageKey,raw,status:errors.length?'invalid':'valid',errors,data};
+}
+function loadStoredDatabase(){
+ for(const storageKey of [key,previousKey,oldKey]){
+  const source=readStoredSource(storageKey);storageRecovery.sources.push(source);
+  if(storageKey===key)storageRecovery.expectedV22=source.raw;
+  if(source.status==='absent')continue;
+  if(source.status!=='valid'){storageRecovery.blocked=true;continue}
+  db={...emptyDatabase(),...source.data};storageRecovery.source=storageKey;storageRecovery.preview=true;
+  // Mantém a conversão já existente da V19, somente sobre a cópia em memória.
+  if(storageKey===oldKey){
+   db={...db,active:[]};
+   db.records.forEach(r=>{r.teacher=LEGACY_MAP[r.teacher]||r.teacher;r.parts.forEach(p=>p.teacher=LEGACY_MAP[p.teacher]||p.teacher)});
+   db.extras.forEach(e=>e.teacher=LEGACY_MAP[e.teacher]||e.teacher);
+   db.events.push({when:new Date().toLocaleString('pt-BR'),action:'Dados de Docência anteriores importados para o Protótipo 22; turmas disponíveis para escolha.'});
+  }
+  break;
+ }
+ if(storageRecovery.blocked)storageRecovery.message=storageRecovery.preview?'Uma versão anterior válida foi carregada somente para consulta e exportação. A edição e a gravação estão bloqueadas: nenhum conteúdo original foi substituído.':'Não foi possível carregar um planejamento com estrutura reconhecida. A edição e a gravação estão bloqueadas para preservar os dados originais.';
+}
+loadStoredDatabase();
 let screen='choose',professor=P[2][0],draft=null,step=0,filterPeriod='all',filterShift='all',filterStatus='all',admin=false,stageTab='groups',stageCohort='ENFM09',stageSubject='9211',stageEditId=null,stageProfessional=P[2][0],stageScheduleRows=[{day:'Segunda',start:'07:00',end:'13:00'}];
 const $=id=>document.getElementById(id),esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const PROVISIONAL_PROFESSIONAL_IDS=Object.freeze(['doc2','doc3']);
@@ -66,7 +121,30 @@ const cohort=code=>allCohorts.find(t=>t.code===code);
 const minutes=s=>{let [h,m]=s.split(':').map(Number);return h*60+m},clock=n=>String(Math.floor(n/60)).padStart(2,'0')+':'+String(n%60).padStart(2,'0');
 function calc(start,n,shift){let t=T[shift],pos=minutes(start),a=[];if(!t.starts.includes(start)||!Number.isInteger(n)||n<1)return null;for(let i=0;i<n;i++){if(pos===t.pause)pos=t.resume;if(pos<t.pause&&pos+50>t.pause||pos+50>t.end)return null;a.push([pos,pos+50]);pos+=50}return a}
 function display(a){if(!a)return 'Horário inválido';let b=[];for(let x of a){let z=b.at(-1);if(z&&z[1]===x[0])z[1]=x[1];else b.push([...x])}return b.map(x=>clock(x[0])+'–'+clock(x[1])).join(' / ')}
-function persist(){localStorage.setItem(key,JSON.stringify(db))}
+function persist(){
+ if(storageRecovery.blocked){alert('Gravação bloqueada para preservar o armazenamento original. Baixe uma cópia dos dados para revisão.');return false}
+ try{
+  const current=localStorage.getItem(key);
+  if(current!==storageRecovery.expectedV22){
+   storageRecovery.sources.push({key,raw:current,status:'changed',errors:['O conteúdo V22 mudou após a abertura desta página.']});
+   throw new Error('storage-changed');
+  }
+  const value=JSON.stringify(db);localStorage.setItem(key,value);storageRecovery.expectedV22=value;return true;
+ }catch(e){
+  storageRecovery.blocked=true;storageRecovery.preview=true;
+  storageRecovery.message='A gravação não foi confirmada. O armazenamento mudou ou não pôde ser gravado. Novas gravações estão bloqueadas; baixe os originais disponíveis e a cópia em memória antes de revisar.';
+  render();return false;
+ }
+}
+function downloadRecoveryFile(filename,text){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type:'application/json;charset=utf-8'}));a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
+function storageOriginalsDocument(){return JSON.stringify({format:'planejamento-storage-originals',sources:storageRecovery.sources.map(({key,raw,status,errors})=>({key,raw,status,errors}))},null,2)}
+function renderStorageRecovery(){
+ const source=storageRecovery.source||'memória da sessão';
+ $('app').innerHTML=`<h2>Recuperação segura do armazenamento</h2><div class="error" role="alert"><p>${esc(storageRecovery.message)}</p><p>Nenhuma versão será escolhida para sobrescrever outra automaticamente.</p></div>${storageRecovery.sources.filter(x=>x.errors.length).map(x=>`<p><b>${esc(x.key)}</b>: ${x.errors.map(esc).join(' ')}</p>`).join('')}<div class="actions"><button id="storage-originals">Baixar originais das chaves consultadas</button>${storageRecovery.preview?'<button id="storage-recovered">Baixar cópia recuperada em memória</button>':''}</div><p class="small">O arquivo de originais preserva os textos brutos disponíveis em campos JSON, inclusive o conteúdo inválido. Chaves inacessíveis são identificadas; seu conteúdo não pôde ser copiado. Os downloads não alteram o navegador.</p>${storageRecovery.preview?`<details><summary>Consultar cópia em memória — ${esc(source)}</summary><pre style="white-space:pre-wrap">${esc(JSON.stringify(db,null,2))}</pre></details>`:''}<p>Para voltar a gravar no V22, é necessário revisar os conjuntos originais e decidir expressamente qual conteúdo deve prevalecer. Esta tela não substitui nem apaga nenhuma chave.</p>`;
+ $('storage-originals').onclick=()=>downloadRecoveryFile('planejamento_originais_armazenamento.json',storageOriginalsDocument());
+ if(storageRecovery.preview)$('storage-recovered').onclick=()=>downloadRecoveryFile('planejamento_copia_recuperada.json',JSON.stringify(db,null,2));
+}
+
 function uid(){return String(Date.now())+'-'+Math.random().toString(36).slice(2)}
 function opts(arr,val,label,current){return arr.map(x=>`<option value="${esc(val(x))}" ${String(val(x))===String(current)?'selected':''}>${esc(label(x))}</option>`).join('')}
 function field(label,id,arr,val,text,current){return `<label for="${id}">${label}</label><select id="${id}">${opts(arr,val,text,current)}</select>`}
@@ -122,7 +200,7 @@ function stageCurricular(code){return M.some(m=>m[0]===code&&m[8])}
 function assignedOrLegacy(value,fallback){return value!==undefined&&value!==null&&value!==''?Number(value):Number(fallback)||0}
 function validAssigned(value){return (typeof value==='number'||typeof value==='string'&&value.trim()!=='')&&Number.isInteger(Number(value))&&Number(value)>=0}
 function extra(id){return db.extras.filter(e=>e.teacher===id).reduce((n,e)=>n+e.n,0)}
-function canEdit(){return db.workflow==='editing'}
+function canEdit(){return !storageRecovery.blocked&&db.workflow==='editing'}
 function startNew(code,subjectCode){if(!db.active.length){alert('Antes de planejar, marque as turmas ofertadas em 2027.1 no painel Planejamento Acadêmico (simulação).');screen='admin';render();return;}let c=cohort(code||db.active[0]);if(!db.active.includes(c?.code)){alert('Turma não ofertada em 2027.1.');return;}if(!c)return;let m=subjectCode?subject(subjectCode,c.period):M.find(x=>x[2]===c.period&&!x[8]);if(!m)return;draft={id:uid(),period:c.period,cohort:c.code,shift:c.shift,subjectCode:m[0],subjectName:m[1],groups:0,manualN:1,parts:[],teacher:professor};step=0;screen='data';render()}
 function editRecord(id){let r=db.records.find(x=>x.id===id);if(!r)return;draft=JSON.parse(JSON.stringify(r));professor=draft.teacher||professor;step=0;screen='data';render()}
 function chooseParts(){return required(draft)}
@@ -251,7 +329,7 @@ function exportExcel(salaryOnly=false){const a=document.createElement('a');a.hre
 
 function go(s){screen=s;render()}
 function nav(){return `<div class="toolbar"><button class="alt compact" data-go="choose">Início</button><button class="alt compact" data-go="home">Docência</button><button class="alt compact" data-go="stage">Estágio</button><button class="alt compact" data-go="conference">Conferência</button><button class="alt compact" data-go="summary">Resumo dos profissionais</button><button class="alt compact" data-go="salary">Grade salarial</button><button class="alt compact" data-go="admin">Planejamento Acadêmico (simulação)</button></div><div class="small">Situação: <b>${db.workflow==='editing'?'Em elaboração':db.workflow==='submitted'?'Enviado para conferência':'Aprovado'}</b> ${canEdit()?'':'🔒 Edição bloqueada'}</div>`}
-function render(){let h=nav();if(['choose','home','data','lesson'].includes(screen)){let duplicates=duplicateRecordKeys();if(duplicates.length)h+=`<div class="error" role="alert"><b>Planejamentos principais duplicados em Docência</b><p>Revise as combinações de turma e disciplina: ${duplicates.map(esc).join(', ')}. Os registros foram preservados, sem exclusão, mesclagem ou sobrescrita automática.</p></div>`;}
+function render(){if(storageRecovery.blocked){renderStorageRecovery();return}let h=nav();if(['choose','home','data','lesson'].includes(screen)){let duplicates=duplicateRecordKeys();if(duplicates.length)h+=`<div class="error" role="alert"><b>Planejamentos principais duplicados em Docência</b><p>Revise as combinações de turma e disciplina: ${duplicates.map(esc).join(', ')}. Os registros foram preservados, sem exclusão, mesclagem ou sobrescrita automática.</p></div>`;}
 if(screen==='choose')h+=`<h2>Enfermagem — Campus 01, Nova Iguaçu</h2><p>Escolha a área de planejamento.</p><button data-go="home">📚 Docência</button><button class="alt" data-go="stage">🏥 Estágio</button><p class="small">Versão 21 de testes. Os dados permanecem somente neste navegador. O perfil administrativo é uma simulação local, sem autenticação.</p>`;
 if(screen==='salary')h+=salaryView();
 if(screen==='stage')h+=stageView();
