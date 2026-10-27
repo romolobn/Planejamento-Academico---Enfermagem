@@ -268,10 +268,40 @@ function salaryRows(id){
  weeklyT:theory?(isStage?assignedWeekly(p.weeklyAssigned):p.n):0,weeklyP:theory||extension?0:isStage?assignedWeekly(p.weeklyAssigned):p.n,...(extension?{chrE:m?.[7],weeklyE:isStage?assignedWeekly(p.weeklyAssigned):p.n}:{})};
  }));
 }
+function salarySections(id){
+  const rows=salaryRows(id), extras=db.extras.filter(e=>e.teacher===id).map(e=>({subject:e.type,group:'Extraclasse',chrT:null,chrP:null,weeklyT:e.n,weeklyP:0}));
+  const stageRows=stageAssignments(id).map(({g,p,n})=>({campus:'01',cohort:g.cohort,code:g.subjectCode,subject:stageSubjects().find(m=>m[0]===g.subjectCode)?.[1]||g.subjectCode,group:g.label+' · '+g.location+' · '+p.schedule.map(x=>x.day+' '+x.start+'–'+x.end).join(' / '),chrT:null,chrP:stageSubjects().find(m=>m[0]===g.subjectCode)?.[4]||0,weeklyT:0,weeklyP:n}));
+ return [{title:'DENTRO DE SALA',rows},{title:'ATIVIDADES EXTRACLASSE',rows:extras},{title:'ESTÁGIO — CAMPO',rows:stageRows}].filter(section=>section.rows.length);
+}
+// Mesma apuração usada pelos subtotais, resumo individual e exportação salarial.
+function salaryTotals(rows){
+ const totals={t:0,p:0,e:0,total:0,pending:false};
+ rows.forEach(row=>{for(const [field,target] of [['weeklyT','t'],['weeklyP','p'],['weeklyE','e']]){
+  if(!(field in row))continue;
+  const value=row[field];
+  if(value===null||value===undefined||String(value).trim()===''||!Number.isFinite(Number(value))||Number(value)<0){totals.pending=true;continue;}
+  totals[target]+=Number(value);
+ }});
+ totals.total=totals.t+totals.p+totals.e;return totals;
+}
+function salarySummary(id){
+ const sections=salarySections(id),totals=salaryTotals(sections.flatMap(section=>section.rows));
+ const extension=sections.some(section=>section.rows.some(row=>'weeklyE' in row));
+ const cells=t=>`<td class="num">${t.t}</td><td class="num">${t.p}</td>${extension?`<td class="num">${t.e}</td>`:''}<td class="num">${t.total}${t.pending?' (parcial)':''}</td>`;
+ return `<section class="salary-summary"><h3>RESUMO FINAL — TEMPOS SEMANAIS</h3>${totals.pending?'<p class="banner">TOTAL PARCIAL — há carga pendente. Não está pronto para lançamento no RH.</p>':''}<table class="salary-table"><thead><tr><th>Núcleo</th><th>T</th><th>P</th>${extension?'<th>Extensão</th>':''}<th>Total</th></tr></thead><tbody>${sections.map(section=>`<tr><td>${section.title}</td>${cells(salaryTotals(section.rows))}</tr>`).join('')}</tbody><tfoot style="font-size:16px"><tr><td>TOTAL GERAL DE TEMPOS SEMANAIS${totals.pending?' — PARCIAL':''}</td>${cells(totals)}</tr></tfoot></table>${extension?'<p class="small">Extensão mantém identificação própria e integra o total sem incluir a parcela Virtual.</p>':''}</section>`;
+}
+function salarySummaryRows(){
+ const rows=[['Profissional','Matrícula','Classificação RH','Núcleo','T','P','Extensão','Total de tempos semanais','Situação']];
+ assignedProfessionalIds().filter(isSalaryProfessional).sort((a,b)=>name(a).localeCompare(name(b),'pt-BR')).forEach(id=>{
+  const sections=salarySections(id);
+  const add=(label,totals)=>rows.push([name(id),mat(id),classification(id),label,totals.t,totals.p,totals.e,totals.total,totals.pending?'PARCIAL — carga pendente; não está pronto para lançamento no RH':'Cargas informadas']);
+  sections.forEach(section=>add(section.title,salaryTotals(section.rows)));
+  add('TOTAL GERAL DE TEMPOS SEMANAIS',salaryTotals(sections.flatMap(section=>section.rows)));
+ });return rows;
+}
 function salaryTable(rows,title){
  const fmt=x=>x==null?'—':esc(x),weeklyFmt=x=>esc(weeklyReportValue(x));
- const extension=rows.some(r=>'weeklyE' in r),pending=rows.some(r=>r.weeklyT===null||r.weeklyP===null||r.weeklyE===null);
- let sumT=rows.reduce((a,r)=>a+(Number(r.weeklyT)||0),0),sumP=rows.reduce((a,r)=>a+(Number(r.weeklyP)||0),0),sumE=rows.reduce((a,r)=>a+(Number(r.weeklyE)||0),0);
+ const extension=rows.some(r=>'weeklyE' in r),{t:sumT,p:sumP,e:sumE,pending}=salaryTotals(rows);
  return `<section class="salary-section"><h3>${title}</h3><div style="overflow-x:auto"><table class="salary-table"><thead><tr><th rowspan="2">Campus</th><th rowspan="2">Turma</th><th rowspan="2">Código</th><th rowspan="2">Disciplina / atividade</th><th rowspan="2">Etapa / grupo</th><th colspan="${extension?3:2}">C.H.R. (h)</th><th colspan="${extension?3:2}">C.H.R.S. (tempos/semana)</th></tr><tr><th>T</th><th>P</th>${extension?'<th>Extensão</th>':''}<th>T</th><th>P</th>${extension?'<th>Extensão</th>':''}</tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(r.campus||'01')}</td><td>${esc(r.cohort||'—')}</td><td>${esc(r.code||'—')}</td><td>${esc(r.subject)}</td><td>${esc(r.group||'—')}</td><td class="num">${fmt(r.chrT)}</td><td class="num">${fmt(r.chrP)}</td>${extension?`<td class="num">${fmt(r.chrE)}</td>`:''}<td class="num">${weeklyFmt(r.weeklyT)}</td><td class="num">${weeklyFmt(r.weeklyP)}</td>${extension?`<td class="num">${weeklyFmt('weeklyE' in r?r.weeklyE:0)}</td>`:''}</tr>`).join('')}</tbody><tfoot><tr><td colspan="${extension?8:7}">${pending?'TOTAL PARCIAL — CARGAS INFORMADAS':'TOTAL DE TEMPOS SEMANAIS'}</td><td class="num">${sumT}</td><td class="num">${sumP}</td>${extension?`<td class="num">${sumE}</td>`:''}</tr></tfoot></table></div></section>`;
 }
 function salaryView(){
@@ -282,9 +312,8 @@ function salaryView(){
  const totalStage=ids.reduce((n,id)=>n+stageLoad(id),0);
  const orderedIds=ids.sort((a,b)=>classification(a).localeCompare(classification(b),'pt-BR')||name(a).localeCompare(name(b),'pt-BR'));
  const sections=orderedIds.map((id,i)=>{
-  const rows=salaryRows(id), extras=db.extras.filter(e=>e.teacher===id).map(e=>({subject:e.type,group:'Extraclasse',chrT:null,chrP:null,weeklyT:e.n,weeklyP:0}));
-  const stageRows=stageAssignments(id).map(({g,p,n})=>({campus:'01',cohort:g.cohort,code:g.subjectCode,subject:stageSubjects().find(m=>m[0]===g.subjectCode)?.[1]||g.subjectCode,group:g.label+' · '+g.location+' · '+p.schedule.map(x=>x.day+' '+x.start+'–'+x.end).join(' / '),chrT:null,chrP:stageSubjects().find(m=>m[0]===g.subjectCode)?.[4]||0,weeklyT:0,weeklyP:n}));
-  return `${i===0||classification(id)!==classification(orderedIds[i-1])?`<h3 class="salary-category">${esc(classification(id).toUpperCase())}S</h3>`:''}<article class="salary-person"><div class="salary-meta"><div><small>${esc(classification(id))} · profissional ${i+1} de ${ids.length}</small><b>${esc(name(id))}</b></div><div><small>Matrícula institucional</small><b>${esc(mat(id))}</b></div></div>${rows.length?salaryTable(rows,'DENTRO DE SALA'):''}${extras.length?salaryTable(extras,'ATIVIDADES EXTRACLASSE'):''}${stageRows.length?salaryTable(stageRows,'ESTÁGIO'):''}</article>`;
+  const sections=salarySections(id);
+  return `${i===0||classification(id)!==classification(orderedIds[i-1])?`<h3 class="salary-category">${esc(classification(id).toUpperCase())}S</h3>`:''}<article class="salary-person"><div class="salary-meta"><div><small>${esc(classification(id))} · profissional ${i+1} de ${ids.length}</small><b>${esc(name(id))}</b></div><div><small>Matrícula institucional</small><b>${esc(mat(id))}</b></div></div>${sections.map(section=>salaryTable(section.rows,section.title)).join('')}${salarySummary(id)}</article>`;
  }).join('');
  return `<h2>Grade salarial — profissionais identificados</h2><div class="no-print"><p class="small">Visualização consolidada: cada profissional com suas próprias atividades, em um único relatório. Atualiza automaticamente conforme o coordenador cadastra atribuições.</p><div class="actions"><button id="salaryprint">Imprimir / salvar PDF</button><button id="salaryexportexcel" class="alt">Exportar Grade Salarial (.xls)</button><button class="alt" data-go="home">Voltar à Docência</button></div></div>
  <div class="salary-head"><div><h2 style="margin:0;color:#193e63">UNIG | GRADES SALARIAIS</h2><div class="small">Enfermagem • Campus 01 — Nova Iguaçu • Matriz G32047 • 2027.1</div></div><div style="text-align:right"><b>${status}</b><div class="small">Protótipo 22 — relatório completo</div></div></div>
@@ -292,7 +321,7 @@ function salaryView(){
  <div class="salary-meta"><div><small>Profissionais identificados com atividades nesta grade</small><b>${ids.length}</b></div><div><small>Atividades incluídas nesta grade</small><b>${db.records.reduce((n,r)=>n+r.parts.filter(p=>isSalaryProfessional(p.teacher)).length,0)} atribuições de aula • ${db.extras.filter(e=>isSalaryProfessional(e.teacher)).length} extraclasse • ${db.stages.reduce((n,g)=>n+g.people.filter(p=>isSalaryProfessional(p.id)).length,0)} atribuições de estágio</b></div></div>
  ${pendingLoadsNote(ids)?`<div class="banner">${esc(pendingLoadsNote(ids))}</div>`:''}
  ${ids.length?sections:'<div class="note">Ainda não existem atividades atribuídas a profissionais para exibir na grade salarial.</div>'}
- <div class="salary-foot"><p>${esc(provisionalLoadsNote())}</p><b>Apuração da Grade Salarial — profissionais identificados (núcleos separados):</b> docência ${totalSala} tempos semanais; extraclasse ${totalExtra} tempos semanais; estágio ${totalStage} tempos semanais. Não somar automaticamente os núcleos.<p><b>Legenda:</b> C.H.R. = carga horária da disciplina, T (teórica) e P (prática). C.H.R.S. = tempos semanais atribuídos. 20 horas curriculares = 1 tempo semanal de 50 minutos. Sem cálculo financeiro.</p></div>`;
+ <div class="salary-foot"><p>${esc(provisionalLoadsNote())}</p><b>Apuração da Grade Salarial — profissionais identificados (núcleos separados):</b> docência ${totalSala} tempos semanais; extraclasse ${totalExtra} tempos semanais; estágio ${totalStage} tempos semanais. O resumo final de cada profissional soma os núcleos para lançamento no RH, mantendo seus subtotais separados.<p><b>Legenda:</b> C.H.R. = carga horária da disciplina, T (teórica) e P (prática). C.H.R.S. = tempos semanais atribuídos. 20 horas curriculares = 1 tempo semanal de 50 minutos. Sem cálculo financeiro.</p></div>`;
 }
 
 
@@ -387,7 +416,7 @@ function excelDocument(salaryOnly=false){
  const title=salaryOnly?'Grade Salarial 2027.1':'Planejamento 2027.1';
  const pendingNote=pendingLoadsNote(assignedProfessionalIds().filter(id=>!salaryOnly||isSalaryProfessional(id)));
  const criteria=salaryOnly?'<Worksheet ss:Name="Critérios"><Table>'+serialize([['Grade Salarial: somente profissionais identificados.'],[provisionalLoadsNote()],['Planejamento geral e Conferência preservam as cargas provisórias. A Conferência considera as turmas ofertadas.'],...(pendingNote?[[pendingNote]]:[])])+'</Table></Worksheet>':pendingNote?'<Worksheet ss:Name="Pendências"><Table>'+serialize([[pendingNote]])+'</Table></Worksheet>':'';
- return '<?xml version="1.0" encoding="UTF-8"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"><Worksheet ss:Name="'+title+'"><Table>'+serialize(excelRows(salaryOnly))+'</Table></Worksheet>'+criteria+'</Workbook>';
+ return '<?xml version="1.0" encoding="UTF-8"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"><Worksheet ss:Name="'+title+'"><Table>'+serialize(excelRows(salaryOnly))+'</Table></Worksheet>'+criteria+(salaryOnly?'<Worksheet ss:Name="Totais por profissional"><Table>'+serialize(salarySummaryRows())+'</Table></Worksheet>':'')+'</Workbook>';
 }
 function exportExcel(salaryOnly=false){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([excelDocument(salaryOnly)],{type:'application/vnd.ms-excel;charset=utf-8'}));a.download=salaryOnly?'grade_salarial_enfermagem_2027_1.xls':'planejamento_enfermagem_2027_1.xls';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
 
