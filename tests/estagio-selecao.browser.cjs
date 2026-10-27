@@ -38,7 +38,7 @@ for(const [code,load] of [['ENFT09','7'],['ENFM09','0']])test('seleção exibida
 test('seleção manual válida persiste nas renderizações e retorno ao módulo',()=>visit(async page=>{
  await page.evaluate(()=>{db.active=['ENFM09','ENFT09','ENFN10'];persist();go('stage')});const before=await snapshot(page);
  await page.locator('#stagecohort').selectOption('ENFN10');await page.locator('#stagesubject').selectOption('8164');
- await page.getByRole('button',{name:'Docência',exact:true}).click();await page.getByRole('button',{name:'Estágio',exact:true}).click();
+ await page.getByRole('button',{name:'Início',exact:true}).click();await page.getByRole('button',{name:'📚 Docência',exact:true}).click();await page.getByRole('button',{name:'Início',exact:true}).click();await page.getByRole('button',{name:'🏥 Estágio',exact:true}).click();
  assert.equal(await page.locator('#stagecohort').inputValue(),'ENFN10');assert.equal(await page.locator('#stagesubject').inputValue(),'8164');
  assert.equal(await page.evaluate(()=>stageCohort),'ENFN10');assert.deepEqual(await snapshot(page),before);
 }));
@@ -46,7 +46,7 @@ test('retirada de oferta selecionada pela interface escolhe próxima válida sem
  await page.evaluate(()=>{db.active=['ENFT09','ENFN10'];db.stages=[{id:'preservar',cohort:'ENFN10',subjectCode:'8164',label:'Grupo A',location:'HGNI',students:10,people:[{id:'doc3',weeklyAssigned:0,schedule:[{day:'Sexta',start:'07:00',end:'13:00'}]}]}];db.extras=[{id:'extra',teacher:'doc2',type:'NDE',n:3}];stageCohort='ENFT09';stageSubject='8955';persist();go('stage')});
  const academic=()=>page.evaluate(()=>JSON.stringify([db.records,db.stages,db.extras,db.observations,db.events,db.versions]));const before=await academic();
  await page.getByRole('button',{name:'Planejamento Acadêmico (simulação)',exact:true}).click();await page.locator('[data-active="ENFT09"]').uncheck();
- await page.getByRole('button',{name:'Estágio',exact:true}).click();assert.equal(await page.locator('#stagecohort').inputValue(),'ENFN10');assert.equal(await page.evaluate(()=>stageCohort),'ENFN10');
+ await page.getByRole('button',{name:'Início',exact:true}).click();await page.getByRole('button',{name:'🏥 Estágio',exact:true}).click();assert.equal(await page.locator('#stagecohort').inputValue(),'ENFN10');assert.equal(await page.evaluate(()=>stageCohort),'ENFN10');
  assert.equal(await page.locator('#stagesubject').inputValue(),'8162');assert.deepEqual(await page.evaluate(()=>db.active),['ENFN10']);assert.equal(await academic(),before);
  const saved=await snapshot(page);await page.getByRole('button',{name:'Conferência',exact:true}).click();
  await page.locator('[data-requirement="E|ENFN10|8164"]').getByRole('button',{name:'Abrir Campo',exact:true}).click();assert.equal(await page.locator('#stagesubject').inputValue(),'8164');assert.deepEqual(await snapshot(page),saved);
